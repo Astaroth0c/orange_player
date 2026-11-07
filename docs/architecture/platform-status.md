@@ -7,7 +7,7 @@
 - Web/PWA production build.
 - Windows Electron desktop package. Remote media is streamed through a custom protocol; HLS playlists and segment URLs are rewritten for desktop playback.
 - Android app shell embeds the web build and uses Media3/ExoPlayer for playback. Its build task copies the web production assets into the APK.
-- Tizen and webOS packaging metadata and vendor setup notes.
+- Samsung Tizen AVPlay playback bridge, package metadata and vendor setup notes; webOS app metadata and web asset packager.
 - GitHub Actions workflow builds Windows installers and Linux AppImage/DEB packages on native runners.
 
 ## Built in this environment
