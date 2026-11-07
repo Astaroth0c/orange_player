@@ -23,4 +23,5 @@ apps/webos/node_modules/
 apps/webos/package-src/
 apps/tizen/*.wgt
 apps/tizen/orange-icon.svg
+apps/tizen/.buildResult/
 apps/webos/orange-icon.svg
