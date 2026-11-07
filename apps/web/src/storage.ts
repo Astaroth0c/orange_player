@@ -3,13 +3,16 @@ import type { MediaItem, StoredSource } from './domain'
 
 export type ProgressRow = { key: string; position: number; duration: number; completed: boolean; updatedAt: number }
 
-const dbPromise = openDB('orange-player', 1, {
-  upgrade(db) {
-    db.createObjectStore('sources', { keyPath: 'id' })
-    db.createObjectStore('catalogs', { keyPath: 'sourceId' })
-    db.createObjectStore('favorites', { keyPath: 'key' })
-    db.createObjectStore('progress', { keyPath: 'key' })
-    db.createObjectStore('settings')
+const dbPromise = openDB('orange-player', 2, {
+  upgrade(db, oldVersion) {
+    if (oldVersion < 1) {
+      db.createObjectStore('sources', { keyPath: 'id' })
+      db.createObjectStore('catalogs', { keyPath: 'sourceId' })
+      db.createObjectStore('favorites', { keyPath: 'key' })
+      db.createObjectStore('progress', { keyPath: 'key' })
+      db.createObjectStore('settings')
+    }
+    if (oldVersion < 2) db.createObjectStore('catalogChunks', { keyPath: ['sourceId', 'generation', 'chunk'] })
   },
 })
 
@@ -17,19 +20,50 @@ export async function getSources(): Promise<StoredSource[]> { return (await dbPr
 export async function saveSource(source: StoredSource): Promise<void> { await (await dbPromise).put('sources', source) }
 export async function removeSource(id: string): Promise<void> {
   const db = await dbPromise
-  const tx = db.transaction(['sources', 'catalogs', 'favorites', 'progress'], 'readwrite')
-  const favorites = tx.objectStore('favorites'), progress = tx.objectStore('progress')
-  const [favoriteKeys, progressKeys] = await Promise.all([favorites.getAllKeys(), progress.getAllKeys()])
+  const tx = db.transaction(['sources', 'catalogs', 'catalogChunks', 'favorites', 'progress', 'settings'], 'readwrite')
+  const favorites = tx.objectStore('favorites'), progress = tx.objectStore('progress'), settings = tx.objectStore('settings'), catalogChunks = tx.objectStore('catalogChunks')
+  const [favoriteKeys, progressKeys, settingKeys, catalogKeys] = await Promise.all([favorites.getAllKeys(), progress.getAllKeys(), settings.getAllKeys(), catalogChunks.getAllKeys()])
   await Promise.all([
     tx.objectStore('sources').delete(id), tx.objectStore('catalogs').delete(id),
+    ...catalogKeys.filter(key => Array.isArray(key) && key[0] === id).map(key => catalogChunks.delete(key)),
     ...favoriteKeys.filter(key => String(key).startsWith(`${id}:`)).map(key => favorites.delete(key)),
     ...progressKeys.filter(key => String(key).startsWith(`${id}:`)).map(key => progress.delete(key)),
+    ...settingKeys.filter(key => String(key).startsWith(`episodes:${id}:`)).map(key => settings.delete(key)),
     tx.done,
   ])
 }
-export async function getCatalog(sourceId: string): Promise<MediaItem[]> { return (await dbPromise).get('catalogs', sourceId) || [] }
-export async function saveCatalog(sourceId: string, items: MediaItem[]): Promise<void> { await (await dbPromise).put('catalogs', { sourceId, items }) }
-export async function allCatalogs(): Promise<MediaItem[]> { return (await dbPromise).getAll('catalogs').then(rows => rows.flatMap(row => row.items as MediaItem[])) }
+export async function getCatalog(sourceId: string): Promise<MediaItem[]> {
+  const db = await dbPromise, catalog = await db.get('catalogs', sourceId)
+  if (catalog?.items) return catalog.items as MediaItem[]
+  if (!catalog?.generation) return []
+  const range = IDBKeyRange.bound([sourceId, catalog.generation, 0], [sourceId, catalog.generation, Number.MAX_SAFE_INTEGER])
+  return db.getAll('catalogChunks', range).then(rows => rows.flatMap(row => row.items as MediaItem[]))
+}
+export async function saveCatalog(sourceId: string, items: MediaItem[]): Promise<void> {
+  const db = await dbPromise, previous = await db.get('catalogs', sourceId), generation = crypto.randomUUID()
+  let written = 0
+  try {
+    for (let offset = 0, chunk = 0; offset < items.length; offset += 1000, chunk++) {
+      await db.put('catalogChunks', { sourceId, generation, chunk, items: items.slice(offset, offset + 1000) })
+      written++
+    }
+    await db.put('catalogs', { sourceId, generation, count: items.length })
+  } catch (error) {
+    const tx = db.transaction('catalogChunks', 'readwrite')
+    await Promise.all([...Array.from({ length: written }, (_, chunk) => tx.store.delete([sourceId, generation, chunk])), tx.done])
+    throw error
+  }
+  if (previous?.generation) {
+    const range = IDBKeyRange.bound([sourceId, previous.generation, 0], [sourceId, previous.generation, Number.MAX_SAFE_INTEGER])
+    const oldKeys = await db.getAllKeys('catalogChunks', range)
+    const tx = db.transaction('catalogChunks', 'readwrite')
+    await Promise.all([...oldKeys.map(key => tx.store.delete(key)), tx.done])
+  }
+}
+export async function allCatalogs(): Promise<MediaItem[]> {
+  const rows = await (await dbPromise).getAll('catalogs')
+  return (await Promise.all(rows.map(row => getCatalog(row.sourceId)))).flat()
+}
 export async function getFavorites(): Promise<string[]> { return (await dbPromise).getAllKeys('favorites').then(keys => keys.map(String)) }
 export async function setFavorite(key: string, enabled: boolean): Promise<void> { const db = await dbPromise; if (enabled) await db.put('favorites', { key }); else await db.delete('favorites', key) }
 export async function getProgress(key: string): Promise<ProgressRow> { return (await dbPromise).get('progress', key).then(row => row || { key, position: 0, duration: 0, completed: false, updatedAt: 0 }) }

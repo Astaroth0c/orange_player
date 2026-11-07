@@ -109,15 +109,16 @@ export function parseM3u(text: string, sourceId: string): MediaItem[] {
   const standalone: MediaItem[] = []
   for (const item of items) {
     if (item.kind !== 'series') { standalone.push(item); continue }
-    const match = item.title.match(/^(.*?)[ ._-]*S(\d{1,2})[ ._-]*E(\d{1,2})\b/i)
+    const match = item.title.match(/\bS(\d{1,2})[ ._-]*E(\d{1,2})\b|\b(\d{1,2})[xX](\d{1,2})\b|\b(?:temporada|temp\.?)\s*(\d{1,2})\s*[ .,:-]*(?:epis[oó]dio|ep\.?)\s*(\d{1,2})\b/i)
     if (!match) { standalone.push(item); continue }
-    const seriesName = match[1].replace(/[._-]+/g, ' ').trim() || item.title
+    const seasonNumber = Number(match[1] || match[3] || match[5]), episodeNumber = Number(match[2] || match[4] || match[6])
+    const seriesName = item.title.slice(0, match.index).replace(/[ ._:-]+$/, '').replace(/[._-]+/g, ' ').trim() || item.title
     const seriesId = stableId(`${sourceId}|series|${item.category}|${seriesName}`)
     const series = grouped.get(seriesId) || {
       ...item, id: seriesId, title: seriesName, kind: 'series' as const,
       url: item.url, episodes: [],
     }
-    series.episodes!.push({ id: item.id, title: item.title, url: item.url, season: Number(match[2]), episode: Number(match[3]) })
+    series.episodes!.push({ id: item.id, title: item.title, url: item.url, season: seasonNumber, episode: episodeNumber })
     grouped.set(seriesId, series)
   }
   for (const series of grouped.values()) series.episodes!.sort((a, b) => a.season - b.season || a.episode - b.episode)
