@@ -12,6 +12,7 @@ import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.PlaybackException
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import androidx.webkit.WebViewAssetLoader
@@ -59,6 +60,10 @@ class MainActivity : Activity() {
                 p.addListener(object : Player.Listener {
                     override fun onPlaybackStateChanged(state: Int) {
                         if (state == Player.STATE_ENDED) { reportProgress(key, parentKey, true); js("window.dispatchEvent(new Event('orange-ended'))") }
+                    }
+                    override fun onPlayerError(error: PlaybackException) {
+                        runOnUiThread { playerView.visibility = View.GONE; web.visibility = View.VISIBLE }
+                        js("window.dispatchEvent(new Event('orange-playback-error'))")
                     }
                 })
                 player = p

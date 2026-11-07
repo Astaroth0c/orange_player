@@ -42,6 +42,7 @@ function App() {
   const [epgNow, setEpgNow] = useState<number | null>(null)
   const [episodeBusy, setEpisodeBusy] = useState(false)
   const [play, setPlay] = useState<PlayState | undefined>(undefined)
+  const [playbackError, setPlaybackError] = useState('')
   const [sourceModal, setSourceModal] = useState(false)
   const [autoplay, setAutoplay] = useState(true)
   const [toast, setToast] = useState('')
@@ -198,6 +199,7 @@ function App() {
     const selectedEpisode = episode || (item.kind === 'series' ? resumeEpisode || firstUnfinished || activeQueue[0] : undefined)
     const index = selectedEpisode ? Math.max(0, activeQueue.findIndex(value => value.id === selectedEpisode.id)) : 0
     setPlay({ item, episode: selectedEpisode, queue: activeQueue, index })
+    setPlaybackError('')
     setSelected(undefined)
     if (window.OrangePlayer) window.OrangePlayer.play(selectedEpisode?.url || item.url, FAVORITE_KEY(item.sourceId, selectedEpisode?.id || item.id), FAVORITE_KEY(item.sourceId, item.id))
     setTimeout(() => videoRef.current?.play().catch(() => {}), 80)
@@ -219,6 +221,7 @@ function App() {
     window.clearTimeout(autoTimer.current)
     setShowNext(false)
     setPlay({ ...play, episode: next, index: play.index + 1 })
+    setPlaybackError('')
     window.OrangePlayer?.play(next.url, FAVORITE_KEY(play.item.sourceId, next.id), FAVORITE_KEY(play.item.sourceId, play.item.id))
     setCountdown(7)
     setTimeout(() => videoRef.current?.play().catch(() => {}), 100)
@@ -251,14 +254,15 @@ function App() {
   useEffect(() => {
     if (window.OrangePlayer) {
       const ended = () => onEndedRef.current()
+      const playbackFailed = () => setPlaybackError('A TV não conseguiu abrir esse stream. Confira se a URL, o formato e as permissões da fonte funcionam em outro player.')
       const progressEvent = (event: Event) => {
         const row = (event as CustomEvent<{ key: string; parentKey: string; position: number; duration: number; ended: boolean }>).detail
         void setProgress(row.key, row.position, row.duration)
         if (row.parentKey !== row.key) void setProgress(row.parentKey, row.position, row.duration)
-        setProgressState(current => ({ ...current, [row.key]: { position: row.ended ? 0 : row.position / 1000, duration: row.duration / 1000, completed: row.ended }, [row.parentKey]: { position: row.ended ? 0 : row.position / 1000, duration: row.duration / 1000, completed: row.ended } }))
+        setProgressState(current => ({ ...current, [row.key]: { position: row.ended ? 0 : row.position, duration: row.duration, completed: row.ended }, [row.parentKey]: { position: row.ended ? 0 : row.position, duration: row.duration, completed: row.ended } }))
       }
-      window.addEventListener('orange-ended', ended); window.addEventListener('orange-progress', progressEvent)
-      return () => { window.removeEventListener('orange-ended', ended); window.removeEventListener('orange-progress', progressEvent) }
+      window.addEventListener('orange-ended', ended); window.addEventListener('orange-progress', progressEvent); window.addEventListener('orange-playback-error', playbackFailed)
+      return () => { window.removeEventListener('orange-ended', ended); window.removeEventListener('orange-progress', progressEvent); window.removeEventListener('orange-playback-error', playbackFailed) }
     }
   }, [])
 
@@ -271,6 +275,11 @@ function App() {
     const key = FAVORITE_KEY(play.item.sourceId, play.episode?.id || play.item.id)
     void (async () => {
       const playableUrl = window.OrangeDesktop ? await window.OrangeDesktop.mediaUrl(url) : url
+      const requestPlay = () => { void video.play().then(() => setPlaybackError('')).catch(error => {
+        if (disposed) return
+        if (error instanceof DOMException && error.name === 'NotAllowedError') setPlaybackError('A reprodução automática foi bloqueada. Pressione “Tocar agora”.')
+        else setPlaybackError('O navegador bloqueou a reprodução. Pressione “Tentar novamente” ou confira o formato do stream.')
+      }) }
       if (/\.m3u8($|\?)/i.test(url) && !video.canPlayType('application/vnd.apple.mpegurl')) {
         const { default: HlsPlayer } = await import('hls.js')
         if (disposed) return
@@ -278,15 +287,49 @@ function App() {
           const hls = new HlsPlayer({ enableWorker: true, lowLatencyMode: play.item.kind === 'live', backBufferLength: 30 })
           hlsRef.current = hls
           hls.loadSource(playableUrl); hls.attachMedia(video)
-          hls.on(HlsPlayer.Events.ERROR, (_event, data) => { if (data.fatal) notify('Falha ao abrir o stream. Confira a fonte ou tente novamente.') })
-        } else video.src = playableUrl
-      } else video.src = playableUrl
+          hls.on(HlsPlayer.Events.MANIFEST_PARSED, requestPlay)
+          hls.on(HlsPlayer.Events.ERROR, (_event, data) => {
+            if (!data.fatal) return
+            const status = data.response?.code ? ` HTTP ${data.response.code}.` : ''
+            setPlaybackError(`Falha HLS (${data.type}/${data.details}).${status} Confira a fonte, a rede e o formato.`)
+          })
+        } else { video.src = playableUrl; video.addEventListener('loadeddata', requestPlay, { once: true }) }
+      } else {
+        video.src = playableUrl
+        video.addEventListener('loadeddata', requestPlay, { once: true })
+      }
       const row = await getProgress(key)
       if (!disposed && row.position > 10) video.currentTime = row.position
       if (!disposed) progressTimer.current = window.setInterval(() => void persistCurrentProgress(), 15_000)
-    })()
+    })().catch(error => {
+      if (disposed) return
+      setPlaybackError(error instanceof Error ? `Falha ao preparar a reprodução: ${error.message}` : 'Falha ao preparar a reprodução. Confira a rede e tente novamente.')
+    })
     return () => { disposed = true; window.clearInterval(progressTimer.current); hlsRef.current?.destroy(); hlsRef.current = undefined }
   }, [play, persistCurrentProgress])
+
+  function retryPlayback() {
+    setPlaybackError('')
+    if (window.OrangePlayer && play) {
+      window.OrangePlayer.play(play.episode?.url || play.item.url, FAVORITE_KEY(play.item.sourceId, play.episode?.id || play.item.id), FAVORITE_KEY(play.item.sourceId, play.item.id))
+      return
+    }
+    if (hlsRef.current) hlsRef.current.startLoad(-1)
+    const video = videoRef.current
+    if (!hlsRef.current) video?.load()
+    if (video) void video.play().then(() => setPlaybackError('')).catch(error => {
+      if (error instanceof DOMException && error.name === 'NotAllowedError') setPlaybackError('O Windows bloqueou o início automático. Pressione “Tocar agora” mais uma vez.')
+      else setPlaybackError('O stream ainda não iniciou. Confira a conexão e o formato da fonte.')
+    })
+  }
+
+  function describeVideoError(video: HTMLVideoElement) {
+    const code = video.error?.code
+    if (code === MediaError.MEDIA_ERR_NETWORK) return 'Erro de rede ao receber o stream. Confirme a conexão e se o servidor permite a reprodução no seu aparelho.'
+    if (code === MediaError.MEDIA_ERR_DECODE) return 'O aparelho recebeu o stream, mas não conseguiu decodificar áudio/vídeo. O codec pode não ser compatível.'
+    if (code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) return 'Formato de stream não suportado por este aparelho ou extensão do endereço incorreta.'
+    return video.error?.message || 'A reprodução foi interrompida. Tente novamente.'
+  }
 
   useEffect(() => {
     if (!showNext) return
@@ -355,7 +398,7 @@ function App() {
       finally { setBusy(false) }
     }} />}
     {selected && <DetailsDialog key={selected.id} item={selected} episodes={detailsEpisodes} epg={detailsEpg} epgNow={epgNow || 0} busy={episodeBusy} progress={progress} favorite={favorites.includes(FAVORITE_KEY(selected.sourceId, selected.id))} onClose={closeDetails} onFavorite={() => void toggleFavorite(selected)} onPlay={() => { const resume = detailsEpisodes.find(episode => progress[FAVORITE_KEY(selected.sourceId, episode.id)]?.position); const firstUnfinished = detailsEpisodes.find(episode => !progress[FAVORITE_KEY(selected.sourceId, episode.id)]?.completed); startPlay(selected, resume || firstUnfinished || detailsEpisodes[0], detailsEpisodes) }} onPlayEpisode={episode => startPlay({ ...selected, episodes: detailsEpisodes }, episode, detailsEpisodes)} />}
-    {play && <div className="player-modal" role="dialog" aria-modal="true" aria-label="Reprodutor de mídia"><button className="player-close" aria-label="Fechar player" onClick={closePlayer}>×</button><div className="player-video-wrap"><video ref={videoRef} controls playsInline autoPlay onEnded={() => void onEnded()} onPause={() => void persistCurrentProgress()} aria-label={play.episode?.title || play.item.title} />{showNext && play.episode && play.index + 1 < play.queue.length && !autoplay && <div className="next-manual"><span>PRÓXIMO EPISÓDIO</span><b>{play.queue[play.index + 1].title}</b><button onClick={playNext}>▶ Assistir agora</button><button className="cancel-next" onClick={() => setShowNext(false)}>Fechar</button></div>}{showNext && play.episode && play.index + 1 < play.queue.length && autoplay && <div className="next-countdown"><span>PRÓXIMO EPISÓDIO · {countdown}s</span><b>{play.queue[play.index + 1].title}</b><div className="countdown-track"><i style={{ transform: `scaleX(${countdown / 7})` }} /></div><button onClick={playNext}>▶ Próximo agora</button><button className="cancel-next" onClick={() => { window.clearTimeout(autoTimer.current); setShowNext(false) }}>Cancelar</button></div>}</div><div className="player-caption"><div><span>{play.item.kind === 'live' ? 'TV AO VIVO' : play.item.kind === 'series' ? play.item.title : 'ORANGE PLAYER'}</span><h2>{play.episode ? `${String(play.episode.season).padStart(2, '0')} × ${String(play.episode.episode).padStart(2, '0')} · ${play.episode.title}` : play.item.title}</h2></div><span className="auto-toggle"><label><input type="checkbox" checked={autoplay} onChange={event => { setAutoplay(event.target.checked); void setSetting('autoplay', event.target.checked) }} /><i /> Autoplay</label></span></div></div>}
+    {play && <div className="player-modal" role="dialog" aria-modal="true" aria-label="Reprodutor de mídia"><button className="player-close" aria-label="Fechar player" onClick={closePlayer}>×</button><div className="player-video-wrap"><video ref={videoRef} controls playsInline autoPlay onError={event => setPlaybackError(describeVideoError(event.currentTarget))} onEnded={() => void onEnded()} onPause={() => void persistCurrentProgress()} aria-label={play.episode?.title || play.item.title} />{playbackError && <div className="playback-error" role="alert"><b>Não foi possível reproduzir</b><p>{playbackError}</p><button className="btn-primary" onClick={retryPlayback}>{playbackError.includes('Tocar agora') ? '▶ Tocar agora' : '▶ Tentar novamente'}</button></div>}{showNext && play.episode && play.index + 1 < play.queue.length && !autoplay && <div className="next-manual"><span>PRÓXIMO EPISÓDIO</span><b>{play.queue[play.index + 1].title}</b><button onClick={playNext}>▶ Assistir agora</button><button className="cancel-next" onClick={() => setShowNext(false)}>Fechar</button></div>}{showNext && play.episode && play.index + 1 < play.queue.length && autoplay && <div className="next-countdown"><span>PRÓXIMO EPISÓDIO · {countdown}s</span><b>{play.queue[play.index + 1].title}</b><div className="countdown-track"><i style={{ transform: `scaleX(${countdown / 7})` }} /></div><button onClick={playNext}>▶ Próximo agora</button><button className="cancel-next" onClick={() => { window.clearTimeout(autoTimer.current); setShowNext(false) }}>Cancelar</button></div>}</div><div className="player-caption"><div><span>{play.item.kind === 'live' ? 'TV AO VIVO' : play.item.kind === 'series' ? play.item.title : 'ORANGE PLAYER'}</span><h2>{play.episode ? `${String(play.episode.season).padStart(2, '0')} × ${String(play.episode.episode).padStart(2, '0')} · ${play.episode.title}` : play.item.title}</h2></div><span className="auto-toggle"><label><input type="checkbox" checked={autoplay} onChange={event => { setAutoplay(event.target.checked); void setSetting('autoplay', event.target.checked) }} /><i /> Autoplay</label></span></div></div>}
     {toast && <div className="toast" role="status">{toast}</div>}
   </div>
 }
