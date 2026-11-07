@@ -1,0 +1,28 @@
+{
+  "name": "orange-player-desktop",
+  "version": "0.1.0",
+  "description": "Player multiplataforma para fontes de mídia autorizadas.",
+  "homepage": "https://github.com/Astaroth0c/orange_player",
+  "private": true,
+  "main": "main.cjs",
+  "scripts": {
+    "build:web": "npm --prefix ../web run build",
+    "prepare:assets": "node prepare-assets.cjs",
+    "dev": "npm run build:web && npm run prepare:assets && electron .",
+    "dist:win": "npm run build:web && npm run prepare:assets && electron-builder --win nsis",
+    "dist:linux": "npm run build:web && npm run prepare:assets && electron-builder --linux AppImage deb"
+  },
+  "devDependencies": {
+    "electron": "45.2.3",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "com.orangeplayer.desktop",
+    "productName": "ORANGE Player",
+    "directories": { "output": "release" },
+    "files": ["main.cjs", "preload.cjs", "package.json", "resources/web/**/*"],
+    "win": { "target": ["nsis"] },
+    "linux": { "target": ["AppImage", "deb"], "category": "AudioVideo", "maintainer": "ORANGE Player project" },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
+  }
+}

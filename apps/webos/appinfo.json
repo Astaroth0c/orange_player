@@ -1,0 +1,11 @@
+{
+  "id": "com.orangeplayer.app",
+  "version": "1.0.0",
+  "vendor": "ORANGE Player",
+  "type": "web",
+  "main": "index.html",
+  "title": "ORANGE Player",
+  "icon": "icon.png",
+  "largeIcon": "largeIcon.png",
+  "requiredPermissions": ["networking"]
+}

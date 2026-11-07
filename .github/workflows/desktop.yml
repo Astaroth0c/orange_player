@@ -1,0 +1,45 @@
+name: Desktop packages
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "apps/web/**"
+      - "apps/desktop/**"
+      - ".github/workflows/desktop.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: win nsis
+          - os: ubuntu-latest
+            target: linux AppImage deb
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            apps/web/package-lock.json
+            apps/desktop/package-lock.json
+      - run: npm ci --prefix apps/web
+      - run: npm ci --prefix apps/desktop
+      - run: npm --prefix apps/web run build
+      - run: npm --prefix apps/desktop run prepare:assets
+      - run: npx electron-builder --${{ matrix.target }}
+        working-directory: apps/desktop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orange-player-${{ matrix.os }}
+          path: apps/desktop/release/*
+          if-no-files-found: error

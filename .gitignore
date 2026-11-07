@@ -5,3 +5,7 @@ local.properties
 .idea/
 *.apk
 *.aab
+apps/desktop/node_modules/
+apps/desktop/release/
+apps/desktop/resources/web/
+android/app/src/main/assets/web/
