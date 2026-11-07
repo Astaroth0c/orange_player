@@ -11,6 +11,8 @@
 - Ambiente disponível: Windows, Node/npm, Python, JDK 21 e Gradle 5.4.1 em cache do usuário.
 - Não foi localizado Android SDK em `C:\Users\Robinho\AppData\Local\Android\Sdk` ou `C:\Android\Sdk`; `adb` e emulador também não estão disponíveis no PATH.
 - Como não há SDK ou aparelho, a compilação/instalação e a validação de controle remoto e reprodução real não podem ser alegadas nesta etapa.
+- O Gradle Wrapper 8.13 foi iniciado com JDK 21 e baixou a distribuição conferida pelo SHA-256 oficial. A configuração de tarefas online ficou sem resposta durante a resolução de plugins; em modo offline, o Gradle confirmou que as dependências Kotlin/Android não estão no cache. Não foi produzido APK.
+- A validação local executada nesta etapa confirmou que o `AndroidManifest.xml` é XML válido; isso não substitui compilação nem teste funcional.
 
 ## Decisões
 
