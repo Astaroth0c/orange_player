@@ -21,6 +21,7 @@ Uma compilação bem-sucedida não valida codecs ou desempenho nos TV Boxes; con
 - Windows desktop installer: `cd apps/desktop && npm ci && npm run dist:win`
 - Linux AppImage and DEB: `cd apps/desktop && npm ci && npm run dist:linux` (build on Linux recommended)
 - Android TV/mobile APK: `cd android && .\gradlew.bat assembleDebug` (requires JDK 21, Android SDK platform 36 and build tools 36.0.0)
-- Samsung Tizen and LG webOS packaging instructions: `apps/tizen/README.md`, `apps/webos/README.md` (vendor SDK, developer certificate/device setup required).
+- Samsung Tizen WGT requires its vendor SDK and a certificate profile tied to the target TV; see `apps/tizen/README.md`.
+- LG webOS developer IPK: `cd apps/webos && npm ci && npm run package` (install on a TV with Developer Mode enabled and configured in webOS CLI; see `apps/webos/README.md`).
 
 The Android app packages the web interface and uses Media3/ExoPlayer for native stream playback. Desktop uses Electron's media proxy for remote playlists and HLS segments. The web version uses browser playback and requires source servers to allow browser CORS for catalog imports.

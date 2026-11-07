@@ -1,0 +1,15 @@
+{
+  "name": "orange-player-webos",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ORANGE Player package for LG webOS TV.",
+  "scripts": {
+    "build:web": "npm --prefix ../web run build",
+    "prepare:assets": "node prepare-assets.cjs",
+    "prepare:package": "node prepare-package.cjs",
+    "package": "npm run build:web && npm run prepare:assets && npm run prepare:package && ares-package package-src"
+  },
+  "devDependencies": {
+    "@webos-tools/cli": "^3.2.6"
+  }
+}

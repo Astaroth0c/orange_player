@@ -3,16 +3,44 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val releaseStoreFile = providers.environmentVariable("ORANGE_STORE_FILE").orNull
+val releaseStorePassword = providers.environmentVariable("ORANGE_STORE_PASSWORD").orNull
+val releaseKeyAlias = providers.environmentVariable("ORANGE_KEY_ALIAS").orNull
+val releaseKeyPassword = providers.environmentVariable("ORANGE_KEY_PASSWORD").orNull
+val releaseSigningValues = listOf(releaseStoreFile, releaseStorePassword, releaseKeyAlias, releaseKeyPassword)
+require(releaseSigningValues.all { it == null } || releaseSigningValues.all { it != null }) {
+    "Configure all four ORANGE_* signing environment variables together to sign a release APK."
+}
+
 android {
     namespace = "com.orangeplayer.poc"
     compileSdk = 36
 
     defaultConfig {
         applicationId = "com.orangeplayer.poc"
-        minSdk = 23
+        minSdk = 24
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
+    }
+    kotlinOptions { jvmTarget = JavaVersion.VERSION_21.toString() }
+    if (releaseSigningValues.all { it != null }) {
+        signingConfigs.create("release") {
+            storeFile = file(releaseStoreFile!!)
+            storePassword = releaseStorePassword
+            keyAlias = releaseKeyAlias
+            keyPassword = releaseKeyPassword
+        }
+    }
+    buildTypes {
+        getByName("release") {
+            isMinifyEnabled = false
+            if (releaseSigningValues.all { it != null }) signingConfig = signingConfigs.getByName("release")
+        }
     }
 }
 
