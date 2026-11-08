@@ -35,6 +35,8 @@ function App() {
   const [page, setPage] = useState('Início')
   const [kind, setKind] = useState<'all' | 'live' | 'movie' | 'series'>('all')
   const [category, setCategory] = useState('all')
+  const [favoritesOnly, setFavoritesOnly] = useState(false)
+  const [expandedSection, setExpandedSection] = useState<'live' | 'movie' | 'series' | null>('live')
   const [search, setSearch] = useState('')
   const [selectedSource, setSelectedSource] = useState('all')
   const [selected, setSelected] = useState<MediaItem | undefined>(undefined)
@@ -146,14 +148,25 @@ function App() {
     if (selectedSource !== 'all') list = list.filter(item => item.sourceId === selectedSource)
     if (kind !== 'all') list = list.filter(item => item.kind === kind)
     if (category !== 'all') list = list.filter(item => item.category === category)
-    if (page === 'Minha lista') list = list.filter(item => favorites.includes(FAVORITE_KEY(item.sourceId, item.id)))
+    if (favoritesOnly || page === 'Minha lista') list = list.filter(item => favorites.includes(FAVORITE_KEY(item.sourceId, item.id)))
     if (page === 'Continuar') list = list.filter(item => Boolean(progress[FAVORITE_KEY(item.sourceId, item.id)]?.position))
     if (search.trim()) {
       const query = search.toLocaleLowerCase()
       list = list.filter(item => `${item.title} ${item.category || ''} ${item.year || ''}`.toLocaleLowerCase().includes(query))
     }
     return list
-  }, [items, selectedSource, kind, category, page, favorites, progress, search])
+  }, [items, selectedSource, kind, category, favoritesOnly, page, favorites, progress, search])
+
+  const catchupChannels = useMemo(() => items.filter(item => item.kind === 'live' && item.archive && (selectedSource === 'all' || item.sourceId === selectedSource)), [items, selectedSource])
+  const mediaNavs = useMemo(() => ([
+    { key: 'live' as const, title: 'Canais', icon: '▣', categories: [...new Set(items.filter(item => item.kind === 'live').map(item => item.category || 'Sem categoria'))].sort((a, b) => a.localeCompare(b, 'pt-BR')) },
+    { key: 'movie' as const, title: 'Filmes', icon: '▰', categories: [...new Set(items.filter(item => item.kind === 'movie').map(item => item.category || 'Sem categoria'))].sort((a, b) => a.localeCompare(b, 'pt-BR')) },
+    { key: 'series' as const, title: 'Séries', icon: '▤', categories: [...new Set(items.filter(item => item.kind === 'series').map(item => item.category || 'Sem categoria'))].sort((a, b) => a.localeCompare(b, 'pt-BR')) },
+  ]), [items])
+
+  function openMediaSection(section: 'live' | 'movie' | 'series', title: string, filter: { category?: string; sourceId?: string; favorites?: boolean } = {}) {
+    setPage(title); setKind(section); setCategory(filter.category || 'all'); setSelectedSource(filter.sourceId || 'all'); setFavoritesOnly(Boolean(filter.favorites)); setRenderCount(80)
+  }
 
   const visibleGroups = useMemo(() => {
     const groups = new Map<string, MediaItem[]>()
@@ -381,11 +394,36 @@ function App() {
       <label className="search"><span>⌕</span><input aria-label="Buscar no catálogo" placeholder="Buscar canais, filmes e séries" value={search} onChange={event => { setSearch(event.target.value); setRenderCount(80) }} /></label>
       <div className="top-actions"><select aria-label="Fonte ativa" value={selectedSource} onChange={event => { setSelectedSource(event.target.value); setRenderCount(80) }}><option value="all">Todas as fontes</option>{sources.map(source => <option key={source.id} value={source.id}>{source.name}</option>)}</select><button className="profile-button" title="Bloquear o cofre" onClick={() => { if (play) closePlayer(); setVault('unlock'); setVaultKey(undefined); setSources([]) }}>R</button></div>
     </header>
-    <aside className="sidebar"><button className="sidebar-toggle" aria-label={sidebarCollapsed ? 'Expandir menu' : 'Recolher menu'} title={sidebarCollapsed ? 'Expandir menu' : 'Recolher menu'} onClick={() => setSidebarCollapsed(value => !value)}>{sidebarCollapsed ? '»' : '«'}</button><span className="side-label">MENU PRINCIPAL</span>{['Início', 'TV ao vivo', 'Filmes', 'Séries', 'Continuar', 'Minha lista'].map((item, index) => <button key={item} title={sidebarCollapsed ? item : undefined} className={`nav-item ${page === item ? 'active' : ''}`} onClick={() => { setPage(item); setRenderCount(80); setKind(item === 'TV ao vivo' ? 'live' : item === 'Filmes' ? 'movie' : item === 'Séries' ? 'series' : 'all') }}><span className="nav-icon">{['◈', '▣', '▰', '▤', '◷', '♡'][index]}</span><span className="nav-label">{item}</span>{page === item && <i />}</button>)}<div className="sidebar-bottom"><span className="side-label">SUA BIBLIOTECA</span><button className="nav-item" onClick={() => setSourceModal(true)}><span className="nav-icon">＋</span><span className="nav-label">Adicionar fonte</span></button>{sources.map(source => <div key={source.id} className="source-entry" title={source.name}><span className="source-dot" /><span className="source-name">{source.name}</span><button disabled={refreshingSource === source.id} title={refreshingSource === source.id ? 'Sincronizando…' : 'Sincronizar fonte'} onClick={() => void refreshSource(source).catch(error => notify(readableError(error)))}>{refreshingSource === source.id ? '…' : '↻'}</button><button title="Remover fonte" onClick={() => void deleteSource(source)}>×</button></div>)}</div><div className="sidebar-footer"><span className="online-dot" /><span className="sidebar-count">{items.length.toLocaleString('pt-BR')} itens disponíveis</span></div></aside>
+    <aside className="sidebar">
+      <button className="sidebar-toggle" aria-label={sidebarCollapsed ? 'Expandir menu' : 'Recolher menu'} title={sidebarCollapsed ? 'Expandir menu' : 'Recolher menu'} onClick={() => setSidebarCollapsed(value => !value)}>{sidebarCollapsed ? '»' : '«'}</button>
+      <span className="side-label">MENU PRINCIPAL</span>
+      <button className={page === 'Início' ? 'nav-item active' : 'nav-item'} onClick={() => { setPage('Início'); setKind('all'); setCategory('all'); setSelectedSource('all'); setFavoritesOnly(false); setRenderCount(80) }}><span className="nav-icon">◈</span><span className="nav-label">Início</span></button>
+      {mediaNavs.map(section => {
+        const sectionItems = items.filter(item => item.kind === section.key)
+        const sectionSources = sources.filter(source => sectionItems.some(item => item.sourceId === source.id))
+        const expanded = expandedSection === section.key && !sidebarCollapsed
+        return <div className="nav-group" key={section.key}>
+          <button className={page === section.title ? 'nav-item active' : 'nav-item'} title={sidebarCollapsed ? section.title : undefined} aria-expanded={expanded} onClick={() => { openMediaSection(section.key, section.title); setExpandedSection(current => current === section.key ? null : section.key) }}><span className="nav-icon">{section.icon}</span><span className="nav-label">{section.title}</span><i className="nav-chevron">{expanded ? '⌄' : '›'}</i></button>
+          {expanded && <div className="nav-submenu">
+            <button onClick={() => openMediaSection(section.key, section.title)} className={category === 'all' && !favoritesOnly && selectedSource === 'all' ? 'selected' : ''}>Todos <small>{sectionItems.length.toLocaleString('pt-BR')}</small></button>
+            <button onClick={() => openMediaSection(section.key, section.title, { favorites: true })} className={favoritesOnly ? 'selected' : ''}>Favoritos <small>{sectionItems.filter(item => favorites.includes(FAVORITE_KEY(item.sourceId, item.id))).length.toLocaleString('pt-BR')}</small></button>
+            {section.categories.length > 0 && <span className="nav-submenu-label">CATEGORIAS</span>}
+            {section.categories.map(value => <button key={value} title={value} onClick={() => openMediaSection(section.key, section.title, { category: value })} className={category === value ? 'selected' : ''}>{value}<small>{sectionItems.filter(item => (item.category || 'Sem categoria') === value).length.toLocaleString('pt-BR')}</small></button>)}
+            {sectionSources.length > 0 && <span className="nav-submenu-label">FONTES</span>}
+            {sectionSources.map(source => <button key={source.id} title={source.name} onClick={() => openMediaSection(section.key, section.title, { sourceId: source.id })} className={selectedSource === source.id ? 'selected' : ''}>{source.name}<small>{sectionItems.filter(item => item.sourceId === source.id).length.toLocaleString('pt-BR')}</small></button>)}
+          </div>}
+        </div>
+      })}
+      <button className={page === 'Catch Up' ? 'nav-item active' : 'nav-item'} title={sidebarCollapsed ? 'Catch Up' : undefined} onClick={() => { setPage('Catch Up'); setKind('live'); setCategory('all'); setSelectedSource('all'); setFavoritesOnly(false); setExpandedSection('live') }}><span className="nav-icon">↶</span><span className="nav-label">Catch Up</span></button>
+      <button className={page === 'Continuar' ? 'nav-item active' : 'nav-item'} title={sidebarCollapsed ? 'Continuar' : undefined} onClick={() => { setPage('Continuar'); setKind('all'); setCategory('all'); setFavoritesOnly(false); setSelectedSource('all'); setRenderCount(80) }}><span className="nav-icon">◷</span><span className="nav-label">Continuar</span></button>
+      <div className="sidebar-bottom"><span className="side-label">SUA BIBLIOTECA</span><button className="nav-item" onClick={() => setSourceModal(true)}><span className="nav-icon">＋</span><span className="nav-label">Adicionar fonte</span></button>{sources.map(source => <div key={source.id} className="source-entry" title={source.name}><span className="source-dot" /><span className="source-name">{source.name}</span><button disabled={refreshingSource === source.id} title={refreshingSource === source.id ? 'Sincronizando…' : 'Sincronizar fonte'} onClick={() => void refreshSource(source).catch(error => notify(readableError(error)))}>{refreshingSource === source.id ? '…' : '↻'}</button><button title="Remover fonte" onClick={() => void deleteSource(source)}>×</button></div>)}</div>
+      <div className="sidebar-footer"><span className="online-dot" /><span className="sidebar-count">{items.length.toLocaleString('pt-BR')} itens disponíveis</span></div>
+    </aside>
     <main className="main-content">
+      {page === 'Catch Up' && <CatchUpGuide channels={catchupChannels} sources={sources} onPlay={(channel, program) => startPlay({ ...channel, title: `${channel.title} · ${program.title}`, url: program.archiveUrl! })} />}
       {page === 'Início' && <section className="welcome-hero"><div className="hero-art" /><div className="hero-copy"><span className="eyebrow"><i /> ORANGE GLASS · SEU UNIVERSO</span><h1>Boas histórias<br /><em>merecem um play.</em></h1><p>Seu catálogo, seus canais e sua próxima maratona em um só lugar.</p><div className="hero-actions"><button className="btn-primary" onClick={() => setSourceModal(true)}>＋ Adicionar fonte</button><button className="btn-ghost" onClick={() => { setPage('TV ao vivo'); setRenderCount(80); setKind('live') }}>▣ Ver TV ao vivo</button></div><div className="hero-stats"><span><b>{items.filter(item => item.kind === 'live').length}</b> canais</span><span><b>{items.filter(item => item.kind === 'movie').length}</b> filmes</span><span><b>{items.filter(item => item.kind === 'series').length}</b> séries</span></div></div><div className="hero-orbit" /><span className="hero-index">01 <i /> ORANGE PLAYER</span></section>}
       {page === 'Início' && <section className="section-block"><div className="section-title"><div><span className="eyebrow">RETOME DE ONDE PAROU</span><h2>Continue assistindo</h2></div><button className="link-button" onClick={() => { setPage('Continuar'); setRenderCount(80) }}>Ver tudo →</button></div><div className="continue-row">{items.filter(item => progress[FAVORITE_KEY(item.sourceId, item.id)]?.position).slice(0, 6).map(item => <MediaCard key={item.id} item={item} progress={progress[FAVORITE_KEY(item.sourceId, item.id)]?.position} onOpen={() => item.kind === 'series' ? startPlay(item) : item.kind === 'live' ? void openDetails(item) : startPlay(item)} onFavorite={() => void toggleFavorite(item)} favorite={favorites.includes(FAVORITE_KEY(item.sourceId, item.id))} />)}{!items.some(item => progress[FAVORITE_KEY(item.sourceId, item.id)]?.position) && <div className="empty-inline"><span>◷</span><b>Sua próxima sessão começa aqui</b><p>Quando você começar um filme ou episódio, ele aparecerá nesta área.</p></div>}</div></section>}
-      <section className="section-block catalog-block">
+      <section hidden={page === 'Catch Up'} className="section-block catalog-block">
         <div className="section-title"><div><span className="eyebrow">{page === 'Início' ? 'DO SEU CATÁLOGO' : page.toLocaleUpperCase('pt-BR')}</span><h2>{page === 'Início' ? 'Explore o catálogo' : page}</h2></div><div className="catalog-controls"><select aria-label="Categoria" onChange={event => { setCategory(event.target.value); setRenderCount(80) }} value={category}><option value="all">Todas as categorias</option>{[...new Set(items.map(item => item.category).filter((value): value is string => Boolean(value)))].sort().map(value => <option key={value}>{value}</option>)}</select><div className="view-filters">{[['all', 'Tudo'], ['live', 'TV'], ['movie', 'Filmes'], ['series', 'Séries']].map(([value, label]) => <button key={value} className={kind === value ? 'selected' : ''} onClick={() => { setKind(value as typeof kind); setRenderCount(80) }}>{label}</button>)}</div></div></div>
         {visibleItems.length ? <>{visibleGroups.map(([heading, group]) => <section className="category-section" key={heading}><h3 className="category-heading">{heading}<span>{group.length}</span></h3><div className="media-grid">{group.map(item => <MediaCard key={item.id} item={item} progress={progress[FAVORITE_KEY(item.sourceId, item.id)]?.position} onOpen={() => item.kind === 'series' || item.kind === 'live' ? void openDetails(item) : startPlay(item)} onDetails={() => void openDetails(item)} onFavorite={() => void toggleFavorite(item)} favorite={favorites.includes(FAVORITE_KEY(item.sourceId, item.id))} />)}</div></section>)}{renderCount < visibleItems.length && <button className="load-more" onClick={() => setRenderCount(value => value + 80)}>Carregar mais {Math.min(80, visibleItems.length - renderCount)} itens</button>}</> : <div className="empty-state"><div className="empty-symbol">{items.length ? '⌕' : '＋'}</div><h3>{items.length ? 'Nada por aqui ainda' : 'Adicione sua primeira fonte'}</h3><p>{items.length ? 'Tente outro filtro ou atualize a fonte selecionada.' : 'Conecte uma lista M3U/M3U8 ou uma conta Xtream autorizada.'}</p><button className="btn-primary" onClick={() => items.length ? setKind('all') : setSourceModal(true)}>{items.length ? 'Limpar filtros' : 'Configurar fonte'}</button></div>}
       </section>
@@ -421,6 +459,75 @@ function App() {
     {play && <div className="player-modal" role="dialog" aria-modal="true" aria-label="Reprodutor de mídia"><button className="player-close" aria-label="Fechar player" onClick={closePlayer}>×</button><div className="player-video-wrap"><video ref={videoRef} controls playsInline autoPlay onError={event => setPlaybackError(describeVideoError(event.currentTarget))} onPlaying={() => setPlaybackError('')} onEnded={() => void onEnded()} onPause={() => void persistCurrentProgress()} aria-label={play.episode?.title || play.item.title}>{subtitleUrl && <track key={subtitleUrl} kind="subtitles" src={subtitleUrl} srcLang="pt-BR" label={`Legenda: ${subtitle?.name}`} default />}</video>{playbackError && <div className="playback-error" role="alert"><b>Não foi possível reproduzir</b><p>{playbackError}</p><button className="btn-primary" onClick={retryPlayback}>{playbackError.includes('Tocar agora') ? '▶ Tocar agora' : '▶ Tentar novamente'}</button></div>}{showNext && play.episode && play.index + 1 < play.queue.length && !autoplay && <div className="next-manual"><span>PRÓXIMO EPISÓDIO</span><b>{play.queue[play.index + 1].title}</b><button onClick={playNext}>▶ Assistir agora</button><button className="cancel-next" onClick={() => setShowNext(false)}>Fechar</button></div>}{showNext && play.episode && play.index + 1 < play.queue.length && autoplay && <div className="next-countdown"><span>PRÓXIMO EPISÓDIO · {countdown}s</span><b>{play.queue[play.index + 1].title}</b><div className="countdown-track"><i style={{ transform: `scaleX(${countdown / 7})` }} /></div><button onClick={playNext}>▶ Próximo agora</button><button className="cancel-next" onClick={() => { window.clearTimeout(autoTimer.current); setShowNext(false) }}>Cancelar</button></div>}</div><div className="player-caption"><div><span>{play.item.kind === 'live' ? 'TV AO VIVO' : play.item.kind === 'series' ? play.item.title : 'ORANGE PLAYER'}</span><h2>{play.episode ? `${String(play.episode.season).padStart(2, '0')} × ${String(play.episode.episode).padStart(2, '0')} · ${play.episode.title}` : play.item.title}</h2></div><div className="player-actions"><button className="subtitle-button" onClick={() => subtitleInput.current?.click()}>{subtitle ? `Legenda: ${subtitle.name}` : '＋ Importar legenda'}</button><input ref={subtitleInput} className="subtitle-input" type="file" accept=".vtt,.srt,text/vtt,application/x-subrip" onChange={async event => { const file = event.target.files?.[0]; if (!file) return; try { const text = await file.text(); const vtt = file.name.toLowerCase().endsWith('.srt') ? `WEBVTT\n\n${text.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2')}` : text; if (!vtt.trimStart().startsWith('WEBVTT')) throw new Error('O arquivo VTT precisa começar com WEBVTT.'); const url = URL.createObjectURL(new Blob([vtt], { type: 'text/vtt' })); setSubtitle({ url, name: file.name }); notify(`Legenda carregada: ${file.name}`) } catch (error) { notify(readableError(error)) } finally { event.currentTarget.value = '' } }} /><span className="auto-toggle"><label><input type="checkbox" checked={autoplay} onChange={event => { setAutoplay(event.target.checked); void setSetting('autoplay', event.target.checked) }} /><i /> Autoplay</label></span></div></div></div>}
     {toast && <div className="toast" role="status">{toast}</div>}
   </div>
+}
+
+function CatchUpGuide({ channels, sources, onPlay }: { channels: MediaItem[]; sources: ResolvedSource[]; onPlay: (channel: MediaItem, program: EpgProgram) => void }) {
+  const [selectedCategory, setSelectedCategory] = useState('all')
+  const [selectedDate, setSelectedDate] = useState('')
+  const [visibleCount, setVisibleCount] = useState(12)
+  const [catalog, setCatalog] = useState<Record<string, { programs: EpgProgram[]; error?: string }>>({})
+  const [busy, setBusy] = useState(false)
+  const [now] = useState(() => Date.now() / 1000)
+  const categories = useMemo(() => [...new Set(channels.map(channel => channel.category || 'Sem categoria'))].sort((a, b) => a.localeCompare(b, 'pt-BR')), [channels])
+  const filteredChannels = useMemo(() => channels.filter(channel => selectedCategory === 'all' || (channel.category || 'Sem categoria') === selectedCategory), [channels, selectedCategory])
+  const visibleChannels = filteredChannels.slice(0, visibleCount)
+
+  useEffect(() => { setCatalog({}); setSelectedDate(''); setVisibleCount(12) }, [channels])
+  useEffect(() => {
+    const pending = visibleChannels.filter(channel => !catalog[channel.id])
+    if (!pending.length) return
+    setBusy(true)
+    void Promise.all(pending.map(async channel => {
+      const source = sources.find(candidate => candidate.id === channel.sourceId && candidate.type === 'xtream')
+      if (!source) return [channel.id, { programs: [], error: 'Catch Up exige uma fonte Xtream compatível.' }] as const
+      try {
+        const programs = await loadXtreamEpg({ server: source.server, username: source.username || '', password: source.secret }, channel, true)
+        return [channel.id, { programs }] as const
+      } catch (error) {
+        return [channel.id, { programs: [], error: readableError(error) }] as const
+      }
+    })).then(results => setCatalog(current => ({ ...current, ...Object.fromEntries(results) }))).finally(() => setBusy(false))
+  }, [visibleChannels, catalog, sources])
+
+  const archivePrograms = useMemo(() => Object.values(catalog).flatMap(row => row.programs).filter(program => program.hasArchive && program.archiveUrl && program.end <= now), [catalog, now])
+  const dates = useMemo(() => [...new Set(archivePrograms.map(program => localDateKey(program.start)))].sort().reverse(), [archivePrograms])
+  useEffect(() => { if (!dates.includes(selectedDate)) setSelectedDate(dates[0] || '') }, [dates, selectedDate])
+
+  const rows = visibleChannels.map(channel => ({ channel, programs: (catalog[channel.id]?.programs || []).filter(program => program.hasArchive && program.archiveUrl && program.end <= now && localDateKey(program.start) === selectedDate).sort((a, b) => a.start - b.start) })).filter(row => row.programs.length)
+  const failed = visibleChannels.filter(channel => catalog[channel.id]?.error).length
+  const slots = Array.from({ length: 48 }, (_, index) => {
+    const date = selectedDate ? new Date(`${selectedDate}T00:00:00`) : new Date()
+    date.setMinutes(index * 30)
+    return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  })
+
+  return <section className="section-block catchup-page">
+    <div className="catchup-heading"><div><span className="eyebrow">PROGRAMAÇÃO DISPONÍVEL</span><h1>Catch Up</h1><p>Volte ao programa que já passou. A disponibilidade depende do arquivo oferecido pela fonte.</p></div><span className="catchup-count">{channels.length.toLocaleString('pt-BR')} canais compatíveis</span></div>
+    {!channels.length ? <div className="empty-state"><div className="empty-symbol">↶</div><h3>Nenhum canal com Catch Up nesta fonte</h3><p>O provedor precisa informar o arquivo de TV para cada canal (tv_archive). Selecione uma fonte Xtream compatível ou confira o serviço.</p></div> : <>
+      <div className="catchup-categories"><button className={selectedCategory === 'all' ? 'selected' : ''} onClick={() => { setSelectedCategory('all'); setVisibleCount(12) }}>Todos os canais</button>{categories.map(value => <button key={value} className={selectedCategory === value ? 'selected' : ''} onClick={() => { setSelectedCategory(value); setVisibleCount(12) }}>{value}</button>)}</div>
+      <div className="catchup-datebar"><b>Dia</b>{dates.length ? dates.map(value => <button key={value} className={selectedDate === value ? 'selected' : ''} onClick={() => setSelectedDate(value)}>{new Date(`${value}T12:00:00`).toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' })}</button>) : <span>{busy ? 'Carregando guia e horários…' : 'Nenhum programa passado foi retornado pelo EPG.'}</span>}</div>
+      {failed > 0 && <p className="catchup-notice">Não foi possível consultar o EPG de {failed} canal(is). Confira a conexão da fonte.</p>}
+      <div className="catchup-grid-scroll"><div className="catchup-grid" style={{ gridTemplateColumns: `220px repeat(48, minmax(104px, 1fr))` }}>
+        <div className="catchup-grid-head catchup-channel-head" style={{ gridRow: 1, gridColumn: 1 }}>CANAL</div>
+        {slots.map((time, index) => <div className="catchup-grid-head" key={index} style={{ gridRow: 1, gridColumn: index + 2 }}>{time}</div>)}
+        {rows.map(({ channel, programs }, rowIndex) => <div className="catchup-grid-row" key={channel.id}>
+          <div className="catchup-channel" style={{ gridRow: rowIndex + 2, gridColumn: 1 }}><b>{channel.title}</b><small>{channel.category}</small></div>
+          {programs.map(program => {
+            const start = new Date(program.start * 1000), minute = start.getHours() * 60 + start.getMinutes()
+            const firstSlot = Math.min(47, Math.floor(minute / 30)), span = Math.min(48 - firstSlot, Math.max(1, Math.ceil((program.end - program.start) / 1800)))
+            return <button className="catchup-program" key={`${channel.id}:${program.start}`} style={{ gridRow: rowIndex + 2, gridColumn: `${firstSlot + 2} / span ${span}` }} title={`${program.title} · ${formatTime(program.end - program.start)}`} onClick={() => onPlay(channel, program)}><b>{program.title}</b><small>{start.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} · Assistir</small></button>
+          })}
+        </div>)}
+        {!rows.length && <div className="catchup-grid-empty" style={{ gridRow: 2, gridColumn: '1 / -1' }}>{busy ? 'Buscando programação arquivada…' : 'Não há programas com replay para este dia. Escolha outra data ou atualize a fonte.'}</div>}
+      </div></div>
+      {visibleCount < filteredChannels.length && <button className="load-more" onClick={() => setVisibleCount(count => count + 12)}>Carregar mais canais</button>}
+    </>}
+  </section>
+}
+
+function localDateKey(timestamp: number) {
+  const date = new Date(timestamp * 1000), pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
 }
 
 function MediaCard({ item, progress = 0, onOpen, onDetails, onFavorite, favorite }: { item: MediaItem; progress?: number; onOpen: () => void; onDetails?: () => void; onFavorite: () => void; favorite: boolean }) {

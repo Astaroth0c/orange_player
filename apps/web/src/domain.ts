@@ -46,6 +46,8 @@ export type MediaItem = {
   externalId?: string
   episodes?: Episode[]
   watched?: boolean
+  archive?: boolean
+  archiveDays?: number
 }
 
 export type Source = {
@@ -60,7 +62,7 @@ export type Source = {
 export type StoredSource = Omit<Source, 'secret'> & { secret: { iv: number[]; ciphertext: number[] } }
 
 export type XtreamInput = { server: string; username: string; password: string }
-export type EpgProgram = { title: string; description: string; start: number; end: number }
+export type EpgProgram = { title: string; description: string; start: number; end: number; hasArchive?: boolean; archiveUrl?: string }
 
 export function stableId(value: string): string {
   let hash = 2166136261
@@ -154,7 +156,7 @@ async function xtreamRequest<T>(input: XtreamInput, action: string, params: Reco
 }
 
 type XtreamCategory = { category_id: string; category_name: string }
-type XtreamStream = { stream_id: number; name: string; stream_icon?: string; cover?: string; plot?: string; category_id?: string; year?: string; rating?: string; episode_run_time?: string; container_extension?: string }
+type XtreamStream = { stream_id: number; name: string; stream_icon?: string; cover?: string; plot?: string; category_id?: string; year?: string; rating?: string; episode_run_time?: string; container_extension?: string; tv_archive?: number | string; tv_archive_duration?: number | string }
 
 function xtreamVodUrl(input: XtreamInput, type: 'movie' | 'series', id: number, extension = 'mp4') {
   const server = normalizeServer(input.server)
@@ -180,6 +182,8 @@ export async function loadXtreamCatalog(input: XtreamInput, sourceId: string): P
       poster: entry.stream_icon || entry.cover, backdrop: entry.cover, description: entry.plot,
       category: categories.get(String(entry.category_id)) || 'Sem categoria', year: entry.year,
       rating: entry.rating, duration: Number(entry.episode_run_time) || undefined, externalId: id,
+      archive: kind === 'live' && Number(entry.tv_archive) === 1,
+      archiveDays: kind === 'live' ? Number(entry.tv_archive_duration) || undefined : undefined,
     }
   }
   const seriesItems = await Promise.all(series.map(async entry => {
@@ -209,14 +213,23 @@ function decodeXtreamText(value = ''): string {
   try { return decodeURIComponent(escape(atob(value))) } catch { return value }
 }
 
-export async function loadXtreamEpg(input: XtreamInput, channel: MediaItem): Promise<EpgProgram[]> {
+export async function loadXtreamEpg(input: XtreamInput, channel: MediaItem, archive = false): Promise<EpgProgram[]> {
   if (!channel.externalId) return []
-  const result = await xtreamRequest<{ epg_listings?: Array<{ title?: string; description?: string; start_timestamp?: string | number; stop_timestamp?: string | number; start?: string; end?: string }> }>(input, 'get_short_epg', { stream_id: channel.externalId, limit: '8' })
+  const result = await xtreamRequest<{ epg_listings?: Array<{ title?: string; description?: string; start_timestamp?: string | number; stop_timestamp?: string | number; start?: string; end?: string; has_archive?: number | string }> }>(input, archive ? 'get_simple_data_table' : 'get_short_epg', { stream_id: channel.externalId, ...(archive ? {} : { limit: '8' }) })
   return (result.epg_listings || []).map(row => {
     const start = Number(row.start_timestamp) || Date.parse(row.start || '') / 1000
     const end = Number(row.stop_timestamp) || Date.parse(row.end || '') / 1000
-    return { title: decodeXtreamText(row.title), description: decodeXtreamText(row.description), start, end }
+    const hasArchive = Number(row.has_archive) === 1
+    return { title: decodeXtreamText(row.title), description: decodeXtreamText(row.description), start, end, hasArchive, ...(archive && hasArchive ? { archiveUrl: xtreamTimeshiftUrl(input, channel.externalId!, start, end) } : {}) }
   }).filter(program => program.title && Number.isFinite(program.start) && Number.isFinite(program.end))
+}
+
+function xtreamTimeshiftUrl(input: XtreamInput, streamId: string, start: number, end: number): string {
+  const date = new Date(start * 1000)
+  const pad = (value: number) => String(value).padStart(2, '0')
+  const timestamp = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}:${pad(date.getHours())}-${pad(date.getMinutes())}`
+  const duration = Math.max(1, Math.ceil((end - start) / 60))
+  return `${normalizeServer(input.server)}/timeshift/${encodeURIComponent(input.username)}/${encodeURIComponent(input.password)}/${duration}/${timestamp}/${encodeURIComponent(streamId)}.m3u8`
 }
 
 export async function loadM3u(url: string, sourceId: string): Promise<MediaItem[]> {
